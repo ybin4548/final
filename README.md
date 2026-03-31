@@ -1,6 +1,6 @@
 # StockHome 앱 구상안
 
-> 마지막 업데이트: 2024년 (ViewModel / 알림 / 커스텀 필드 렌더링 설계 진행 중)
+> 마지막 업데이트: 2026년 3월 (ViewModel / 알림 / 커스텀 필드 렌더링 설계 진행 중)
 
 ---
 
@@ -10,85 +10,173 @@
 자취 세대의 증가에 따라 본인이 무엇을 구매했는지, 어디에 보관하는지, 식재료라면 유통기한은 언제까지인지를 카테고리별로 관리할 수 있는 앱의 필요성에서 출발.
 
 ### 핵심 목표
-- 카테고리(폴더) 단위로 물건 정보를 기록·관리
-- 유통기한 기반 푸시 알림
-- 사용자가 직접 커스텀 필드를 정의할 수 있는 동적 입력 시스템
-- 완전한 로컬 동작 (인터넷 연결 없이도 모든 기능 사용 가능)
+- 카테고리 / 위치 단위로 재고 정보를 기록·관리
+- 바코드 / 영수증 OCR / AI 카메라 / 텍스트 등 다양한 등록 방식 제공
+- 자연어 기반 AI 챗봇으로 재고 검색 및 레시피 추천
+- 유통기한 임박 / 재고 부족 알림
+- CoreData 로컬 저장 + Supabase 서버 하이브리드 구조
 - 실제 앱스토어 배포 목표
 
 ### 기술 스택
+
 | 항목 | 선택 | 비고 |
 |---|---|---|
 | UI | UIKit + SnapKit | |
 | 반응형 바인딩 | RxSwift | |
-| 로컬 저장 | CoreData | |
-| 최소 지원 버전 | iOS 18.0+ | AI 기능은 iOS 26.0+ 버전 분기 처리 |
-| 바코드 스캔 | AVFoundation + Open Food Facts API | 오픈소스 상품 DB 연동 |
-| 영수증 OCR | Vision Framework (VNRecognizeTextRequest) | iPhone 기본 OCR 기능 활용 |
-| AI 검색 / 챗봇 | Swift Foundation Model | iOS 26.0+ 기기에서만 활성화 |
+| 로컬 저장 | CoreData | 재고 데이터 오프라인 접근 |
+| 서버 / 알림 | Supabase | Gemini 호출, 패턴 분석, 푸시 알림 |
+| AI 카메라 | Gemini 2.5 Flash | 상품 사진 인식 → 등록 초안 생성 |
+| 영수증 OCR | Vision Framework (VNRecognizeTextRequest) | iPhone 기본 OCR |
+| 바코드 스캔 | AVFoundation | 카메라 바코드 인식 |
+| 바코드 상품 정보 | 식품안전나라 바코드연계제품정보 API (C005) | 식품 상품 정보 조회 |
+| 레시피 API | 식품안전나라 조리식품 레시피 DB (COOKRCP01) | 보유 재료 기반 레시피 조회 |
+| 백엔드 구현 | ClaudeCode MCP | Supabase 백엔드 로직 자동화 |
+| 최소 지원 버전 | iOS 18.0+ | AI 기능은 Foundation Model 분기 처리 |
 | 추후 확장 | iCloud 동기화 (NSPersistentCloudKitContainer) | |
+
+### 데이터 저장 전략 (하이브리드)
+
+| 데이터 | 저장 위치 | 이유 |
+|---|---|---|
+| 재고 / 카테고리 / 위치 | CoreData (로컬) | 오프라인에서도 조회 가능 |
+| 소비 이력 / 패턴 분석 | Supabase | 서버에서 통계 처리 |
+| 챗봇 대화 히스토리 | CoreData (로컬) | 빠른 접근, 오프라인 지원 |
+| Gemini API 호출 | Supabase 서버 경유 | API 키 보안, 서버 로직 처리 |
+| 푸시 알림 발송 | Supabase | 소비 패턴 기반 서버 알림 |
 
 ---
 
-## 2. 핵심 기능 정의
+## 2. 화면별 기능 정의
 
-### 카테고리 관리
-- 사용자가 폴더처럼 카테고리를 직접 생성
-- 이름 / 아이콘(SF Symbols) / 색상 커스텀
-- 카테고리 간 스위칭으로 물건 목록 전환
+### 메인 화면
+1. 전체 재고 요약 정보 확인
+   - 식재료 개수 확인
+   - 생활용품 개수 확인
+   - 전체 등록 아이템 수 확인
+2. 유통기한 임박 식재료 확인
+   - 유통기한이 가까운 식재료 목록 조회
+   - D-day 형태로 표시
+   - 해당 아이템 상세 화면으로 이동
+3. 재고 부족 물품 확인
+   - 수량이 부족한 생활용품 목록 조회
+   - 부족 상태 우선 노출
+   - 해당 아이템 상세 화면으로 이동
+4. 최근 등록 아이템 확인
+   - 최근 등록된 식재료 / 생활용품 목록 조회
+   - 썸네일, 이름, 카테고리, 등록일 표시
+   - 상세 화면으로 이동
+5. 전체 현황 확인
+   - 현재 재고를 요약 카드 형태로 제공
+   - 식재료 / 생활용품별 현황 구분 표시
 
-### 위치 관리
-- 아이템이 보관된 위치를 별도로 관리 (예: 냉장고, 서랍장, 베란다)
-- 위치 등록 / 수정 / 삭제
-- 아이템 등록 시 위치 선택
+### 등록 화면
+1. 바코드 스캔 등록
+   - 카메라를 통해 바코드 인식
+   - 식품안전나라 C005 API로 인식된 상품 정보 조회
+   - 등록 초안으로 생성 후 사용자가 정보 수정 후 저장
+2. 영수증 기반 아이템 등록
+   - 카메라로 영수증 촬영
+   - Vision Framework OCR로 품목명 / 가격 / 날짜 추출
+   - 추출된 항목을 등록 후보 리스트로 제공
+   - 사용자가 필요한 항목만 선택 후 저장
+3. AI 기반 아이템 등록
+   - 카메라로 상품 촬영
+   - Gemini 2.5 Flash로 사진 전송 → 상품 정보 인식
+   - 처리된 데이터를 리스트로 제공
+   - 사용자가 필요한 항목만 선택 후 저장
+4. 텍스트 기반 아이템 등록
+   - 이름 직접 입력
+   - 카테고리 선택
+   - 수량 입력
+   - 구매 시간 (자동 현재 Date 기입)
+   - 컴포넌트 모듈 방식으로 선택적 추가 입력
+     - 위치 입력
+     - 메모 입력
+     - 사진 입력
+     - 시간 입력 (예: 유통기한)
+   - 저장
+5. 사용자 정의 카테고리 선택
+   - 기본 카테고리 선택
+   - 사용자가 만든 카테고리 선택
+   - 등록 중 새 카테고리 추가 가능
+6. 위치 선택 기능
+   - 기존 위치 선택
+   - 신규 위치 추가 후 선택 가능
+7. 등록 완료 후 후속 처리
+   - 저장 후 재고 현황 반영
+   - 저장 완료 안내 제공
 
-### 아이템 관리
-- 아이템 등록 / 수정 / 삭제
-- 재고 조회 (카테고리 / 위치별)
-- 기본 필드: 이름, 수량, 위치, 유통기한, 메모, 사진
-- 커스텀 필드: 사용자가 직접 필드를 정의 (동적 필드 시스템)
+### 재고 현황 화면
+1. 상위 분류 전환
+   - 기본 탭 조회
+   - 생활용품 탭 조회
+2. 하위 카테고리별 아이템 조회
+   - 기본 카테고리별 조회
+   - 사용자 정의 카테고리별 조회
+   - 전체 카테고리 조회
+3. 아이템 리스트 표시
+   - 썸네일, 이름, 카테고리, 수량, 위치, 상태 표시
+4. 식재료 전용 상태 표시
+   - 유통기한 상태 / 만료 상태 표시
+   - 보관 방식 표시
+   - 소비 여부 표시
+5. 생활용품 전용 상태 표시
+   - 재고 부족 여부, 물건 위치, 대표 사진 표시
+6. 아이템 상세 조회
+   - 리스트 선택 시 상세 화면 이동
+   - 상세 정보 확인, 컴포넌트 모듈화 표기
+7. 아이템 검색 및 정렬
+   - 카테고리 기준 / 최근 등록순 / 유통기한순 / 부족 재고순 정렬
+8. 재고 수정 / 삭제
+   - 상세 화면 진입 후 수정 / 삭제 기능 제공
 
-### 사진 등록
-- 아이템별 사진 등록 / 삭제
-- FileManager 로컬 저장, CoreData에 파일명(경로)만 보관
+### 챗봇 검색 화면
+1. 채팅 기반 재고 검색
+   - 자연어 문장 입력
+   - 예: "욕실에 있는 세제 보여줘"
+   - 예: "유통기한 얼마 안 남은 식재료 알려줘"
+2. 재고 조건 해석
+   - 식재료 / 생활용품 구분
+   - 카테고리 / 위치 / 상태 조건 해석
+3. 검색 결과 출력
+   - 조건에 맞는 아이템 리스트 표시
+   - 결과 없을 경우 안내 메시지 제공
+   - 관련 재고 화면으로 이동 가능
+4. 레시피 검색
+   - 보유 식재료 기반 레시피 추천
+   - 특정 재료를 포함한 레시피 검색
+   - 부족한 재료가 있는 경우 함께 안내
+   - 요리 질문 → Foundation Model → 1차 메뉴 제공 → 조리법 질문 → COOKRCP01 API 결과 출력
+5. 대화형 후속 질문 지원 (v1.1)
+   - 검색 결과 기반 추가 질문 가능
+   - 예: "그중 유통기한 임박한 것만 보여줘"
+6. 추천 문장 제공
+   - 검색 의도에 맞는 결과 요약
+   - 예: "욕실 카테고리에서 세제 2개를 찾았어요"
+7. 재고 상세 연동
+   - 챗봇 결과에서 특정 아이템 선택 시 상세 화면 이동
 
-### 동적 커스텀 필드 시스템
-카테고리마다 고정된 필드가 아니라, 사용자가 직접 필드명과 입력 타입을 정의하는 구조.
+### 카메라 기능
+1. 영수증 OCR → CoreData 저장
+   - Vision OCR → Foundation Model 처리 → 저장
+2. 바코드 스캔 → CoreData 저장
+   - 데이터 미존재 시 수동 입력 유도
+3. AI를 통한 상품 유추 → CoreData 저장
+   - Gemini 2.5 Flash 추론 모델 사용
+   - 상품 사진 → 추론 → 결과 도출 → 상품 등록 화면 바인드
 
-| 필드 타입 | 설명 | 예시 |
-|---|---|---|
-| TextField | 텍스트 자유 입력 | "선물해준 사람" → 여자친구 |
-| Stepper | 숫자 증감 입력 | "리필 횟수" → 3 |
-| DatePicker | 날짜 선택 | "구매일" → 2024.01.01 |
-| Toggle | 온/오프 선택 | "개봉 여부" → true |
+### 위젯 기능 (+ 퀵액션) — v1.1
+1. 아이폰 메인화면 위젯을 통한 등록화면 진입
+2. 동작 순서
+   - 위젯 / 퀵액션 / 빠른 실행 → 앱 → 카메라 연결
+   - 촬영 후 작업 선택 조건 처리
 
-### 홈 요약
-- 메인 화면 상단에 유통기한 임박 아이템 / 재고 부족 아이템 요약 배너 표시
-- 유통기한 임박: UNUserNotificationCenter 로컬 푸시 알림 + 홈 상단 배너
-- 재고 부족: 수량이 기준치 이하일 때 홈 상단 배너 + 푸시 알림
-
-### AI 검색 및 챗봇
-- Swift Foundation Model을 이용해 자연어로 재고 조회
-- CoreData 데이터를 기반으로 프롬프트를 구성해 응답 생성
-- iOS 26.0+ 기기에서만 활성화, 미만 버전은 기능 비노출 처리
-
-| 기능 | 예시 |
-|---|---|
-| 재고 조회 | "지금 집에 과자 몇 개 있어?", "몽쉘은 몇 개야?" |
-| 식재료 조회 | "집에 식재료는 뭐가 있어?" |
-| 레시피 추천 | "집에 있는 재료로 저녁 뭐 먹을까?", "김치로 할 수 있는 요리는?" |
-
-### 바코드 스캔 등록
-- AVFoundation으로 카메라에 접근해 바코드 스캔
-- Open Food Facts API로 상품 정보(이름, 카테고리 등) 자동 조회
-- 조회된 정보를 CoreData에 자동 등록
-- 홈 화면 위젯 / 빠른 실행 기능으로 앱 실행 전 바탕화면에서 바로 카메라 접근 가능
-
-### 영수증 스캔 등록
-- 카메라로 영수증 촬영
-- Vision Framework의 `VNRecognizeTextRequest`로 텍스트 OCR 추출
-- 추출된 텍스트를 Swift Foundation Model에 전달해 아이템 파싱
-- 파싱된 아이템 목록을 CoreData에 일괄 자동 등록
+### Notification (Supabase)
+1. 재고 부족 알림
+   - 단순 재고 현황 알림 🔔
+     - 예: "몽쉘 재고가 2개 남았어요!"
+   - 소비 패턴 기반 구매 타이밍 알림 🔔 (v1.1)
+     - 예: "몽쉘을 보통 3일마다 구매하세요. 현재 재고로는 2일치 남았어요!"
 
 ---
 
@@ -97,7 +185,7 @@
 ### 패턴
 **MVVM + RxSwift**
 
-Clean Architecture는 도입하지 않음. 현재 프로젝트 규모와 단독 개발 환경을 고려해 MVVM만으로 충분한 구조를 유지하는 것을 목표로 함.
+Clean Architecture는 도입하지 않음. 현재 프로젝트 규모와 2인 개발 환경을 고려해 MVVM만으로 충분한 구조를 유지하는 것을 목표로 함.
 
 ### 화면 전환
 
@@ -141,7 +229,7 @@ func showItemList(category: Category) {
 
 #### 선택: **Layer 중심 (팀 컨벤션 기반)**
 
-> 팀에서 기존에 `View`, `ViewModel`, `Model`, `Manager`, `Utils` 단위로 분리해온 방식을 따름. Feature 중심은 Clean Architecture와 유사한 느낌을 주어 현재 프로젝트의 단순한 MVVM 구조와 맞지 않는다고 판단. Coordinator는 화면 전환 전담 역할이므로 별도 폴더로 분리.
+> 팀에서 기존에 View, ViewModel, Model, Manager, Utils 단위로 분리해온 방식을 따름. Coordinator는 화면 전환 전담 역할이므로 별도 폴더로 분리.
 
 ### 디렉토리 구조
 
@@ -155,56 +243,71 @@ StockHome/
 │   ├── AppCoordinator.swift
 │   ├── CategoryCoordinator.swift
 │   ├── ItemCoordinator.swift
+│   ├── ChatCoordinator.swift
+│   ├── CameraCoordinator.swift
 │   └── CoordinatorProtocol.swift
 │
 ├── View/                          # ViewController + 커스텀 View / Cell
-│   ├── Home/
-│   │   ├── HomeViewController.swift
-│   │   └── CategoryCell.swift
+│   ├── Main/
+│   │   ├── MainViewController.swift
+│   │   └── SummaryCardView.swift
+│   ├── Register/
+│   │   ├── RegisterViewController.swift
+│   │   ├── BarcodeRegisterViewController.swift
+│   │   ├── ReceiptRegisterViewController.swift
+│   │   ├── AIRegisterViewController.swift
+│   │   └── ComponentModuleView.swift
+│   ├── Stock/
+│   │   ├── StockListViewController.swift
+│   │   ├── StockDetailViewController.swift
+│   │   └── StockCell.swift
+│   ├── Chat/
+│   │   ├── ChatViewController.swift
+│   │   └── ChatBubbleCell.swift
 │   ├── Category/
-│   │   ├── CategoryListViewController.swift
-│   │   └── CategoryCreateViewController.swift
-│   ├── Item/
-│   │   ├── ItemListViewController.swift
-│   │   ├── ItemDetailViewController.swift
-│   │   ├── ItemCreateViewController.swift
-│   │   └── ItemCell.swift
-│   └── CustomField/
-│       ├── CustomFieldViewController.swift
-│       └── CustomFieldCell.swift
+│   │   ├── CategoryViewController.swift
+│   │   └── CategoryCell.swift
+│   └── Camera/
+│       └── CameraViewController.swift
 │
 ├── ViewModel/
-│   ├── HomeViewModel.swift
-│   ├── CategoryViewModel.swift
-│   ├── ItemListViewModel.swift
-│   ├── ItemDetailViewModel.swift
-│   └── CustomFieldViewModel.swift
+│   ├── MainViewModel.swift
+│   ├── RegisterViewModel.swift
+│   ├── StockListViewModel.swift
+│   ├── StockDetailViewModel.swift
+│   ├── ChatViewModel.swift
+│   └── CategoryViewModel.swift
 │
 ├── Model/
 │   ├── StockHome.xcdatamodeld
 │   ├── CategoryEntity+CoreDataClass.swift
+│   ├── LocationEntity+CoreDataClass.swift
 │   ├── ItemEntity+CoreDataClass.swift
 │   ├── CustomFieldEntity+CoreDataClass.swift
-│   └── ItemImageEntity+CoreDataClass.swift
+│   ├── ItemImageEntity+CoreDataClass.swift
+│   └── ChatHistoryEntity+CoreDataClass.swift
 │
 ├── Manager/
 │   ├── CoreDataManager.swift
+│   ├── SupabaseManager.swift          # Supabase 클라이언트
+│   ├── GeminiManager.swift            # Gemini 2.5 Flash API
 │   ├── NotificationManager.swift
 │   ├── ImageManager.swift
+│   ├── BarcodeManager.swift           # AVFoundation 바코드 스캔
+│   ├── OCRManager.swift               # Vision Framework OCR
+│   ├── RecipeAPIManager.swift         # 식품안전나라 COOKRCP01
 │   ├── UserDefaultsManager.swift
-│   ├── PermissionManager.swift
-│   ├── BarcodeManager.swift        # AVFoundation 바코드 스캔
-│   ├── OCRManager.swift            # Vision Framework 영수증 OCR
-│   └── AIManager.swift             # Swift Foundation Model 연동
+│   └── PermissionManager.swift
 │
 ├── Protocols/
 │   ├── CoreDataManagerProtocol.swift
+│   ├── SupabaseManagerProtocol.swift
+│   ├── GeminiManagerProtocol.swift
 │   ├── NotificationManagerProtocol.swift
 │   ├── ImageManagerProtocol.swift
-│   ├── UserDefaultsManagerProtocol.swift
 │   ├── BarcodeManagerProtocol.swift
 │   ├── OCRManagerProtocol.swift
-│   └── AIManagerProtocol.swift
+│   └── RecipeAPIManagerProtocol.swift
 │
 ├── Utils/
 │   ├── Extensions/
@@ -221,8 +324,6 @@ StockHome/
 
 ### Manager + Protocol 설계 (DI 기반)
 
-싱글톤의 테스트 문제를 해결하기 위해 Protocol로 추상화하고 ViewModel에 주입하는 방식을 채택.
-
 #### 비교 검토
 
 | 방식 | 장점 | 단점 |
@@ -232,33 +333,22 @@ StockHome/
 
 #### 선택: **Protocol + DI (기본값은 싱글톤 유지)**
 
-> 배포 목표 앱으로 추후 테스트 도입을 고려해 Protocol 추상화를 적용. 싱글톤 자체는 유지하되 ViewModel이 `.shared`를 직접 참조하지 않고 Protocol을 통해 주입받는 구조.
+> 싱글톤 자체는 유지하되 ViewModel이 `.shared`를 직접 참조하지 않고 Protocol을 통해 주입받는 구조. 추후 테스트 도입 시 Mock 교체 가능.
 
 ```swift
-// Protocol 정의
 protocol CoreDataManagerProtocol {
     func fetchItems() -> [Item]
     func saveItem(_ item: Item)
 }
 
-// 실제 구현체
 class CoreDataManager: CoreDataManagerProtocol {
     static let shared = CoreDataManager()
     func fetchItems() -> [Item] { ... }
     func saveItem(_ item: Item) { ... }
 }
 
-// Mock (테스트용)
-class MockCoreDataManager: CoreDataManagerProtocol {
-    var stubbedItems: [Item] = []
-    func fetchItems() -> [Item] { return stubbedItems }
-    func saveItem(_ item: Item) { stubbedItems.append(item) }
-}
-
-// ViewModel — 기본값은 실제 구현체, 테스트 시 Mock 주입
 class ItemListViewModel {
     private let manager: CoreDataManagerProtocol
-
     init(manager: CoreDataManagerProtocol = CoreDataManager.shared) {
         self.manager = manager
     }
@@ -275,6 +365,7 @@ class ItemListViewModel {
 Category  1 ──< Item  1 ──< CustomField
                      1 ──< ItemImage
 Location  1 ──< Item
+ChatHistory (독립)
 ```
 
 ### 삭제 규칙 (Delete Rule)
@@ -313,7 +404,7 @@ Location  1 ──< Item
 | expirationDate | Date? | 유통기한 (없을 수 있음) |
 | notificationEnabled | Boolean | 유통기한 알림 활성화 여부 |
 | notificationDaysBefore | Int16 | 며칠 전 알림 |
-| barcodeValue | String? | 바코드 스캔 값 (없을 수 있음) |
+| barcodeValue | String? | 바코드 스캔 값 |
 | memo | String? | 메모 |
 | createdAt | Date | 생성일 |
 | updatedAt | Date | 수정일 |
@@ -334,9 +425,17 @@ Location  1 ──< Item
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | id | UUID | 고유 식별자 |
-| fileName | String | 파일명 (경로 참조용) |
+| fileName | String | 파일명 (FileManager 경로 참조용) |
 | order | Int16 | 이미지 순서 |
 | itemId | UUID (FK) | 소속 아이템 |
+
+#### ChatHistory
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| id | UUID | 고유 식별자 |
+| role | String | "user" / "assistant" |
+| content | String | 대화 내용 |
+| createdAt | Date | 생성일 |
 
 ### 이미지 저장 방식
 
@@ -346,29 +445,11 @@ Location  1 ──< Item
 |---|---|---|
 | Binary 직접 저장 | 별도 파일 관리 불필요 | CoreData 용량 부담, 성능 저하 |
 | External Storage 옵션 | 자동 용량 분리 | iCloud 동기화 버그 위험, 디버깅 어려움 |
-| FileManager + 경로 저장 | 용량 제어 가능, iCloud 확장 안전, 웹 경험과 구조 동일 | 파일 삭제 로직 직접 관리 필요 |
+| FileManager + 경로 저장 | 용량 제어 가능, iCloud 확장 안전 | 파일 삭제 로직 직접 관리 필요 |
 
 #### 선택: **FileManager + 경로 저장**
 
-> 완전한 로컬 동작을 보장하면서 iCloud 확장 시 안전한 구조. 웹 개발에서의 디렉토리 경로 기반 저장 경험과 구조가 동일. 이미지 실체는 `Documents/Images/`에 저장하고, CoreData에는 파일명만 보관. Item 삭제 시 `CoreDataManager`에서 `ImageManager`를 호출해 파일도 함께 삭제 처리.
-
-```swift
-// 저장
-let fileName = "\(UUID().uuidString).jpg"
-let url = FileManager.default
-    .urls(for: .documentDirectory, in: .userDomainMask)[0]
-    .appendingPathComponent("Images/\(fileName)")
-try imageData.write(to: url)
-
-// 삭제 (CoreDataManager에서 함께 처리)
-func deleteItem(_ item: Item) {
-    item.images?.forEach { image in
-        ImageManager.shared.deleteImage(fileName: image.fileName)
-    }
-    context.delete(item)
-    saveContext()
-}
-```
+> 이미지 실체는 `Documents/Images/`에 저장하고 CoreData에는 파일명만 보관. Item 삭제 시 `CoreDataManager`에서 `ImageManager`를 호출해 파일도 함께 삭제 처리.
 
 ### 커스텀 필드 저장 방식
 
@@ -377,12 +458,12 @@ func deleteItem(_ item: Item) {
 | 방식 | 장점 | 단점 |
 |---|---|---|
 | JSON 직렬화 | 스키마 단순, 구현 빠름 | 커스텀 필드 기준 검색 불가, 파싱 오류 시 전체 유실 위험 |
-| EAV 패턴 | 필드 단위 CRUD, 검색 가능, 데이터 무결성 보장, iCloud 충돌 처리 유리 | 스키마 복잡도 증가 |
-| Transformable | Swift 객체 그대로 저장 가능 | NSCoding 필요, iCloud 궁합 나쁨, 마이그레이션 까다로움 |
+| EAV 패턴 | 필드 단위 CRUD, 검색 가능, 데이터 무결성 보장 | 스키마 복잡도 증가 |
+| Transformable | Swift 객체 그대로 저장 가능 | NSCoding 필요, iCloud 궁합 나쁨 |
 
 #### 선택: **EAV 패턴**
 
-> 커스텀 필드 기준 검색 가능성을 열어두기 위해 EAV 패턴 채택. Transformable은 iCloud 확장 목표와 맞지 않아 제외. JSON은 검색이 불가능해 제외.
+> 커스텀 필드 기준 검색 가능성을 열어두기 위해 채택. Transformable은 iCloud 확장 목표와 맞지 않아 제외. JSON은 검색 불가로 제외.
 
 ---
 
@@ -393,73 +474,88 @@ func deleteItem(_ item: Item) {
 - 기간: 3주 (주말 포함 21일 풀타임)
 - 숙련도: 주니어~미들
 
-### v1.0 MVP (3주 내 배포 목표)
+### v1.0 MVP
 
 | 기능 | 상세 |
 |---|---|
-| 카테고리 관리 | 생성 / 수정 / 삭제, 이름 / 아이콘(SF Symbols) / 색상 설정 |
-| 위치 관리 | 보관 위치 등록 / 수정 / 삭제, 아이템 등록 시 위치 선택 |
-| 아이템 관리 | 등록 / 수정 / 삭제, 재고 조회 (카테고리 / 위치별) |
-| 아이템 기본 필드 | 이름, 수량, 위치, 유통기한, 메모, 사진 |
-| 커스텀 필드 시스템 | TextField / Stepper / DatePicker / Toggle 타입 직접 정의 |
-| 홈 요약 | 유통기한 임박 / 재고 부족 배너 + 푸시 알림 |
-| AI 검색 / 챗봇 | 자연어 재고 조회 + 레시피 추천 (iOS 26.0+ 분기) |
-| 바코드 스캔 등록 | AVFoundation + Open Food Facts API 자동 등록, 위젯/빠른 실행 |
-| 영수증 스캔 등록 | Vision OCR + Foundation Model 파싱 → 일괄 자동 등록 |
+| 카테고리 관리 | 생성 / 수정 / 삭제, 이름 / 아이콘 / 색상 설정 |
+| 위치 관리 | 보관 위치 등록 / 수정 / 삭제 |
+| 텍스트 기반 아이템 등록 | 컴포넌트 모듈 방식, 기본 필드 + 커스텀 필드 |
+| 바코드 스캔 등록 | AVFoundation + 식품안전나라 C005 API |
+| 영수증 OCR 등록 | Vision Framework OCR + Foundation Model 파싱 |
+| AI 카메라 등록 | Gemini 2.5 Flash 상품 인식 |
+| 재고 현황 조회 | 카테고리 / 위치별 조회, 정렬, 상세 보기 |
+| 커스텀 필드 시스템 | TextField / Stepper / DatePicker / Toggle |
+| 홈 요약 | 유통기한 임박 / 재고 부족 배너 |
+| 유통기한 / 재고 부족 알림 | 단순 재고 현황 푸시 알림 (Supabase) |
+| AI 챗봇 재고 검색 | 자연어 재고 조회 + 레시피 추천 (COOKRCP01 API) |
 
 ### v1.1 이후 추가 예정
 
 | 기능 | 제외 이유 |
 |---|---|
-| 카테고리 순서 변경 (드래그) | MVP 핵심 가치와 무관한 편의 기능 |
-| 아이템 정렬 / 필터 | AI 검색으로 대체 가능, 추후 사용자 피드백 반영 후 추가 |
-| iCloud 동기화 | 로컬 완결 우선, 안정화 후 확장 |
+| 소비 패턴 기반 알림 | 소비 이력 데이터 누적 필요, 신규 사용자 온보딩 처리 필요 |
+| 대화형 후속 질문 | 챗봇 히스토리 관리 복잡도 높음 |
+| 위젯 / 퀵액션 | 편의 기능, MVP 핵심 가치와 무관 |
+| 카테고리 순서 변경 (드래그) | 편의 기능, 우선순위 낮음 |
+| 아이템 정렬 / 필터 고도화 | AI 챗봇으로 대체 가능 |
+| iCloud 동기화 | 로컬 안정화 후 확장 |
 
 ### 예상 작업 일정
 
 | 단계 | 예상 기간 |
 |---|---|
-| 프로젝트 세팅 / 폴더 구조 / CoreData 설정 | 1~2일 |
+| 프로젝트 세팅 / CoreData / Supabase 초기 설정 | 1~2일 |
 | 카테고리 / 위치 CRUD + UI | 2~3일 |
-| 아이템 CRUD + UI | 3~4일 |
-| 홈 요약 + 유통기한 알림 시스템 | 1~2일 |
-| 커스텀 필드 시스템 | 3~4일 |
-| 바코드 스캔 + Open Food Facts 연동 | 1~2일 |
+| 텍스트 기반 아이템 등록 + 커스텀 필드 | 3~4일 |
+| 재고 현황 조회 + 상세 UI | 2~3일 |
+| 바코드 스캔 + 식품안전나라 API 연동 | 1~2일 |
 | 영수증 OCR + Foundation Model 파싱 | 2~3일 |
-| AI 검색 / 챗봇 (Foundation Model) | 2~3일 |
-| 위젯 / 빠른 실행 | 1일 |
+| AI 카메라 등록 (Gemini 연동) | 2~3일 |
+| 홈 요약 + Supabase 알림 | 1~2일 |
+| AI 챗봇 + 레시피 API 연동 | 2~3일 |
 | QA / 버그 수정 / 배포 준비 | 3일 (최소 확보 권장) |
-| **합계** | **약 19~27일** |
+| **합계** | **약 19~28일** |
 
-> 21일 내 완료를 목표로 하되, 일정이 밀릴 경우 위젯/빠른 실행 → 레시피 추천 → 영수증 스캔 순으로 v1.1로 이연하고 QA 시간을 우선 확보할 것.
+> 21일 내 완료를 목표로 하되, 일정이 밀릴 경우 AI 챗봇 레시피 → 영수증 OCR → AI 카메라 순으로 v1.1 이연하고 QA 시간 우선 확보.
 
 ---
 
-## 7. 향후 논의 예정 항목
+## 7. 외부 API 목록
+
+| API | 용도 | 제공처 |
+|---|---|---|
+| 바코드연계제품정보 (C005) | 바코드 스캔 후 식품 상품 정보 조회 | 식품안전나라 |
+| 조리식품 레시피 DB (COOKRCP01) | 보유 재료 기반 레시피 조회 | 식품안전나라 |
+| Gemini 2.5 Flash | AI 카메라 상품 인식, 영수증 파싱 보조 | Google |
+| Supabase | 서버 로직, 푸시 알림, 소비 패턴 분석 | Supabase |
+
+---
+
+## 8. 향후 논의 예정 항목
 
 | 순위 | 항목 | 상태 |
 |---|---|---|
 | 3 | ViewModel Input/Output 설계 | 예정 |
 | 4 | 알림 시스템 구조 | 예정 |
 | 5 | 커스텀 필드 렌더링 전략 | 예정 |
+| - | UI / 디자인 시스템 | 디자이너와 협의 예정 |
 
 ---
 
-## 8. 주요 의사결정 요약
+## 9. 주요 의사결정 요약
 
 | 항목 | 선택 | 핵심 이유 |
 |---|---|---|
-| 커스텀 필드 MVP 포함 여부 | v1.0에 포함 | 주말 포함 21일 풀타임으로 일정 내 완료 가능 판단 |
-| 최소 지원 버전 | iOS 18.0+ | AI 기능만 iOS 26.0+ 버전 분기 처리 |
-| 바코드 상품 정보 | Open Food Facts API | 무료 오픈소스 API로 상품 정보 자동 조회 |
-| 영수증 텍스트 추출 | Vision Framework OCR | iPhone 기본 기능 활용, 외부 의존 없음 |
-| AI 기능 | Swift Foundation Model | 온디바이스 처리, 외부 API 불필요 |
-| 위치 관리 | 별도 Location Entity | Nullify 삭제 규칙으로 아이템 데이터 보존 |
 | 아키텍처 | MVVM + RxSwift | Clean Architecture 없이 충분한 규모 |
 | 화면 전환 | Coordinator 패턴 | 전환 로직 집중화, RxSwift output 연동 |
 | 폴더 구조 | Layer 중심 (팀 컨벤션) | 팀 익숙도, 단순한 MVVM 구조에 적합 |
 | Manager 방식 | Protocol + DI | 테스트 시 Mock 교체 가능 |
+| 데이터 저장 | CoreData + Supabase 하이브리드 | 오프라인 접근(CoreData) + 서버 로직(Supabase) |
+| AI 기능 | Gemini 2.5 Flash (Supabase 경유) | API 키 보안, 물체 추론 인식 |
 | 커스텀 필드 저장 | EAV 패턴 | 검색 가능성, 데이터 무결성 |
 | 이미지 저장 | FileManager + 경로 | 용량 제어, iCloud 확장 안전 |
-| 데이터 저장 | CoreData (로컬) | 완전한 오프라인 동작 보장 |
-| iCloud 확장 | NSPersistentCloudKitContainer | CoreDataStack 교체만으로 확장 가능 |
+| 바코드 상품 정보 | 식품안전나라 C005 API | 무료 오픈소스, 한국 식품 DB |
+| 레시피 API | 식품안전나라 COOKRCP01 | 무료 오픈소스, 한국 레시피 DB |
+| 소비 패턴 알림 | v1.1 이연 | 초기 데이터 누적 필요, 온보딩 처리 필요 |
+| 위젯 / 퀵액션 | v1.1 이연 | 편의 기능, MVP 핵심 가치와 무관 |
